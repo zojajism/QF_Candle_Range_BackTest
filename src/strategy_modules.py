@@ -60,7 +60,6 @@ Three_Candle_Strike_Bearish = None
 CE_LONG = None
 CE_SHORT = None
 Volume_AVG = None
-HTF_candle_bios = None
 
 MACD_LINE = None
 MACD_SIGNAL = None
@@ -71,6 +70,10 @@ DEFAULT_ORDER_UNITS = None
 
 Last_Signal_Date = None
 Last_Signal_Date_Counter = 0
+
+#Higher Timeframe (HTF) management variables
+HTF_candle_bios = None
+Candle_Count_After_HTF_Reset = 0
 
 #strategy_modules_history_rows = []  # type: List[tuple]
 
@@ -382,7 +385,7 @@ def calculate_MACD():
     ind_key = IndicatorKey(symbol, timeframe, "MACD_HISTOGRAM_EXPANDING")
     buffers.INDICATOR_BUFFER.append(ind_key, {"event_time": close_time, "value": MACD_HISTOGRAM_EXPANDING})
 
-def calculate_ATR():
+def calculate_ATR(timeframe: str):
     global ATR
     ATR_LEN = ps.ATR_LEN
     key = Keys(exchange=exchange, symbol=symbol, timeframe=timeframe)
@@ -1463,6 +1466,69 @@ def is_valid_signal_detected_3LineStrike() -> tuple[bool, str, Decimal, Decimal]
 
     return False, None, None, None
 
+def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
+    key = Keys(exchange=exchange, symbol=symbol, timeframe=timeframe)
+    candle = buffer_initializer.CANDLE_BUFFER.last_n(key, 2)
+
+    runtime = _load_htf_runtime()
+    if not runtime:
+        return
+
+    htf_key = Keys(exchange=exchange, symbol=symbol, timeframe=runtime["htf_tf"])
+    HTF_Candle = buffer_initializer.CANDLE_BUFFER.last_n(htf_key, 1)
+
+    HTF_ind_key = IndicatorKey(symbol, runtime["htf_tf"], "ATR")
+    HTF_ATR_values = buffer_initializer.INDICATOR_BUFFER.last_n(HTF_ind_key, 1)
+    HTF_ATR = Decimal(str(HTF_ATR_values[0]["value"])) if HTF_ATR_values else None
+
+    if len(HTF_Candle) < 1:
+        return False, None, None, None
+
+    current_open = Decimal(str(candle[1]["open"]))
+    current_high = Decimal(str(candle[1]["high"]))
+    current_low = Decimal(str(candle[1]["low"]))
+    current_close = Decimal(str(candle[1]["close"]))
+
+    HTF_open = Decimal(str(HTF_Candle[0]["open"]))
+    HTF_high = Decimal(str(HTF_Candle[0]["high"]))
+    HTF_low = Decimal(str(HTF_Candle[0]["low"]))
+    HTF_close = Decimal(str(HTF_Candle[0]["close"]))
+
+    # Skip if last candle range is too large (>= 2 ATR)
+    # or if close is too close to open (potentially weak signal)
+    '''
+    if (HTF_high - HTF_low >= ATR * Decimal("2")
+        or abs(HTF_close - HTF_open) < ATR * Decimal("0.5")):
+        return False, None, None, None
+    '''
+
+    #logger.info(f"HTF Range Check: HTF_open={HTF_open}, HTF_high={HTF_high}, HTF_low={HTF_low}, HTF_close={HTF_close}, current_open={current_open}, current_close={current_close}")
+    #logger.info(f"LTF Range Check: LTF_open={current_open}, LTF_high={current_high}, LTF_low={current_low}, LTF_close={current_close}, HTF_open={HTF_open}, HTF_high={HTF_high}, HTF_low={HTF_low}, HTF_close={HTF_close}")
+    # --- Long setup ---
+    if (
+        current_open < current_close # the LTF candle is green
+        and current_close > HTF_high # the LTF candle is green
+        and HTF_open < HTF_close # the HTF candle is green
+    ):
+        sl_price = Decimal(str(candle[0]["low"]))
+        sl_distance = Decimal(str(candle[1]["close"])) - sl_price
+        target_price = Decimal(str(candle[0]["close"])) + (sl_distance * Decimal("1.5"))
+        return True, "BUY", target_price, sl_price
+
+    # --- Short setup ---
+    if (
+        current_open > current_close # the LTF candle is red
+        and current_close < HTF_low # the LTF candle is red
+        and HTF_open > HTF_close # the HTF candle is red
+    ):
+        sl_price = Decimal(str(candle[0]["high"]))
+        sl_distance = sl_price - Decimal(str(candle[1]["close"]))
+        target_price = Decimal(str(candle[0]["close"])) - (sl_distance * Decimal("1.5"))
+        return True, "SELL", target_price, sl_price
+
+
+    return False, None, None, None
+
 def is_valid_signal_detected() -> tuple[bool, str, Decimal, Decimal]:
     key = Keys(exchange=exchange, symbol=symbol, timeframe=timeframe)
     candle = buffer_initializer.CANDLE_BUFFER.last_n(key, 1)
@@ -2035,10 +2101,19 @@ def manage_HTF():
 
     buffers.CANDLE_BUFFER.append(htf_key, htf_candle)
 
+    global Candle_Count_After_HTF_Reset
+    Candle_Count_After_HTF_Reset = 0
+    
+
+
     #Calculate Indicators for HTF candle immediately after creation
+    #calculate_ATR(runtime["htf_tf"])
+
+    '''
     calculate_ADX(runtime["htf_tf"])
     update_pivot_buffer(runtime["htf_tf"])
     get_HTF_candle_bios(runtime["htf_tf"])
+    '''
     
     # Records values and history
     record_strategy_modules_history_HTF(runtime["htf_tf"])

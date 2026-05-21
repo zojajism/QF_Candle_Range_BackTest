@@ -74,21 +74,23 @@ def run_engine(candle_body: Dict[str, Any]):
     sm.exchange = exchange
     sm.close_time = close_time
 
-    logger.info(f"Candle received: {sm.symbol}, {sm.timeframe}, {pm.format_time_simple(str(sm.close_time))}, {close}")
+    logger.info(f"Candle received: {sm.symbol}, {sm.timeframe}, {pm.format_time_simple(str(sm.close_time))}, {close}, Candle_counter: {sm.Candle_Count_After_HTF_Reset}")
 
     # Append candle to the list =============================================================================================
     key = Keys(sm.exchange, sm.symbol, sm.timeframe)
     buffers.CANDLE_BUFFER.append(key, candle_body)
     #========================================================================================================================
 
+    sm.Candle_Count_After_HTF_Reset += 1
+    
     #Manage HTF
     sm.manage_HTF()
 
     #=========================================================================================================================
 
-
     # Call engine modules to calculate engine parameters ====================================================================
-    sm.calculate_ATR()
+    '''
+    sm.calculate_ATR(sm.timeframe)
     sm.calculate_MACD()
     sm.calculate_EMA(speed="fast")
     sm.calculate_EMA(speed="slow")
@@ -106,13 +108,6 @@ def run_engine(candle_body: Dict[str, Any]):
     sm.calculate_Chandelier_Exit()
     sm.calculate_Volume_AVG()
     sm.update_pivot_buffer(sm.timeframe)
-    
-    '''
-    ind_key = IndicatorKey(symbol, timeframe, "ATR")
-    values = buffers.INDICATOR_BUFFER.get_or_create(ind_key)
-    print(f"Indicator Buffer values for {symbol}, {timeframe}, ATR:")
-    for v in values:
-        print(v)
     '''
     #========================================================================================================================
 
@@ -123,13 +118,14 @@ def run_engine(candle_body: Dict[str, Any]):
     if pm.validate_trading_hours(sm.close_time) == False:
         order_is_allowed = False
 
+    if sm.Candle_Count_After_HTF_Reset != 1:
+        order_is_allowed = False
+
     # if all general conditions are met, then check strategy specific conditions and send order
-    
     if order_is_allowed:
         
         try:
-            #valid_signal, side, TP, SL = sm.is_valid_signal_detected()
-            valid_signal, side, TP, SL = sm.is_valid_signal_detected_3LineStrike()
+            valid_signal, side, TP, SL = sm.is_valid_signal_HTF_Range()
         except Exception as e:
             logger.error(f"Error in strategy signal detection: {e}")
             valid_signal = False
@@ -216,13 +212,6 @@ def run_engine(candle_body: Dict[str, Any]):
     #update open signal registry from db
     sm.open_sig_registry.bootstrap_from_db(get_pg_conn(), ps.symbol) 
         
-    #------------------------------------------------------------------------------------------------------------------------------------
-    # Process trailing SL for open signals based on the new candle close price, when we have already applied all levels of trailing SL
-    # This is useful for following the price in such cases that the price moves towards TP but doesn't trigger any new trailing SL level 
-    if ps.ignore_follow_price == 0:
-        sm.open_sig_registry.process_TSL_candle_close(candle_body)
-    #------------------------------------------------------------------------------------------------------------------------------------
-
     # Records values and history
     sm.record_strategy_modules_history(sm.timeframe)
     #========================================================================================================================
