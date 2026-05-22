@@ -1489,6 +1489,11 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
     current_low = Decimal(str(candle[1]["low"]))
     current_close = Decimal(str(candle[1]["close"]))
 
+    prev_open = Decimal(str(candle[0]["open"]))
+    prev_high = Decimal(str(candle[0]["high"]))
+    prev_low = Decimal(str(candle[0]["low"]))
+    prev_close = Decimal(str(candle[0]["close"]))
+
     HTF_open = Decimal(str(HTF_Candle[0]["open"]))
     HTF_high = Decimal(str(HTF_Candle[0]["high"]))
     HTF_low = Decimal(str(HTF_Candle[0]["low"]))
@@ -1510,9 +1515,9 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
         and current_close > HTF_high # the LTF candle is green
         and HTF_open < HTF_close # the HTF candle is green
     ):
-        sl_price = Decimal(str(candle[0]["low"]))
-        sl_distance = Decimal(str(candle[1]["close"])) - sl_price
-        target_price = Decimal(str(candle[0]["close"])) + (sl_distance * Decimal("1.5"))
+        sl_price = prev_low
+        sl_distance = current_close - sl_price
+        target_price = current_close + (sl_distance * Decimal("1.5"))
         return True, "BUY", target_price, sl_price
 
     # --- Short setup ---
@@ -1521,9 +1526,9 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
         and current_close < HTF_low # the LTF candle is red
         and HTF_open > HTF_close # the HTF candle is red
     ):
-        sl_price = Decimal(str(candle[0]["high"]))
-        sl_distance = sl_price - Decimal(str(candle[1]["close"]))
-        target_price = Decimal(str(candle[0]["close"])) - (sl_distance * Decimal("1.5"))
+        sl_price = prev_high
+        sl_distance = sl_price - current_close
+        target_price = current_close - (sl_distance * Decimal("1.5"))
         return True, "SELL", target_price, sl_price
 
 

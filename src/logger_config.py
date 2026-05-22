@@ -18,7 +18,7 @@ def setup_logger():
     
 
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "QF_RAEP_BT.log"
+    log_file = log_dir / "QF_CandleRange_BackTest.log"
 
     file_handler = TimedRotatingFileHandler(
         str(log_file),
@@ -46,7 +46,7 @@ def setup_logger():
         handlers=handlers
     )
 
-    logger = logging.getLogger("QF_RAEP_BT")
+    logger = logging.getLogger("QF_CandleRange_BackTest")
     logger.info(
                 json.dumps({
                         "EventCode": 0,
