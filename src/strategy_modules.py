@@ -1472,7 +1472,14 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
 
     runtime = _load_htf_runtime()
     if not runtime:
-        return
+        return False, None, None, None
+
+    pivot_registry: PivotBufferRegistry = get_pivot_registry()
+    pb = pivot_registry.get(exchange, symbol, runtime["htf_tf"])
+    latest_peak = pb.latest_peak()
+    latest_low = pb.latest_low()
+    recent_pivot_high = Decimal(str(latest_peak.price)) if latest_peak and latest_peak.price is not None else None
+    recent_pivot_low = Decimal(str(latest_low.price)) if latest_low and latest_low.price is not None else None
 
     htf_key = Keys(exchange=exchange, symbol=symbol, timeframe=runtime["htf_tf"])
     HTF_Candle = buffer_initializer.CANDLE_BUFFER.last_n(htf_key, 1)
@@ -1512,23 +1519,39 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
     # --- Long setup ---
     if (
         current_open < current_close # the LTF candle is green
-        and current_close > HTF_high # the LTF candle is green
-        and HTF_open < HTF_close # the HTF candle is green
+        and current_close > HTF_high # LTF close is above HTF high
+        #and HTF_open < HTF_close # the HTF candle is green
     ):
-        sl_price = prev_low
+        sl_price = HTF_low + (( HTF_high - HTF_low ) / Decimal("2"))
         sl_distance = current_close - sl_price
-        target_price = current_close + (sl_distance * Decimal("1.5"))
+        rr_target = current_close + (sl_distance * Decimal("1.5"))
+        target_price = (
+            min(rr_target, recent_pivot_high)
+            if recent_pivot_high is not None and recent_pivot_high > current_close
+            else rr_target
+        )
+        if target_price > rr_target:
+            return False, None, None, None  # Skip if we had to reduce RR below 1.0 to fit pivot constraint
+        
         return True, "BUY", target_price, sl_price
 
     # --- Short setup ---
     if (
         current_open > current_close # the LTF candle is red
-        and current_close < HTF_low # the LTF candle is red
-        and HTF_open > HTF_close # the HTF candle is red
+        and current_close < HTF_low # LTF close is below HTF low
+        #and HTF_open > HTF_close # the HTF candle is red
     ):
-        sl_price = prev_high
+        sl_price = HTF_high - (( HTF_high - HTF_low ) / Decimal("2"))
         sl_distance = sl_price - current_close
-        target_price = current_close - (sl_distance * Decimal("1.5"))
+        rr_target = current_close - (sl_distance * Decimal("1.5"))
+        target_price = (
+            max(rr_target, recent_pivot_low)
+            if recent_pivot_low is not None and recent_pivot_low < current_close
+            else rr_target
+        )
+        if target_price < rr_target:
+            return False, None, None, None  # Skip if we had to reduce RR below 1.0 to fit pivot constraint
+
         return True, "SELL", target_price, sl_price
 
 
@@ -2114,9 +2137,9 @@ def manage_HTF():
     #Calculate Indicators for HTF candle immediately after creation
     #calculate_ATR(runtime["htf_tf"])
 
+    update_pivot_buffer(runtime["htf_tf"])
     '''
     calculate_ADX(runtime["htf_tf"])
-    update_pivot_buffer(runtime["htf_tf"])
     get_HTF_candle_bios(runtime["htf_tf"])
     '''
     
