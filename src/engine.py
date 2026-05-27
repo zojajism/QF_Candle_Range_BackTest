@@ -74,6 +74,8 @@ def run_engine(candle_body: Dict[str, Any]):
     sm.exchange = exchange
     sm.close_time = close_time
 
+    sm.Candle_Count_After_HTF_Reset += 1
+    
     logger.info(f"Candle received: {sm.symbol}, {sm.timeframe}, {pm.format_time_simple(str(sm.close_time))}, {close}, Candle_counter: {sm.Candle_Count_After_HTF_Reset}")
 
     # Append candle to the list =============================================================================================
@@ -81,20 +83,18 @@ def run_engine(candle_body: Dict[str, Any]):
     buffers.CANDLE_BUFFER.append(key, candle_body)
     #========================================================================================================================
 
-    sm.Candle_Count_After_HTF_Reset += 1
-    
     #Manage HTF
     sm.manage_HTF()
 
     #=========================================================================================================================
 
     # Call engine modules to calculate engine parameters ====================================================================
+    '''
     sm.calculate_ATR(sm.timeframe)
     sm.calculate_MACD()
     sm.calculate_RSI()
     sm.calculate_EMA(speed="fast")
     sm.calculate_EMA(speed="slow")
-    '''
     sm.calculate_ADX(sm.timeframe)
     sm.calc_norm_slope()
     sm.check_trend()
