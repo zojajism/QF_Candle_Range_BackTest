@@ -1522,9 +1522,12 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
         and current_close > HTF_high # LTF close is above HTF high
         #and HTF_open < HTF_close # the HTF candle is green
     ):
-        sl_price = HTF_low + (( HTF_high - HTF_low ) / Decimal("2"))
+        if ( HTF_high - HTF_low ) >= ATR * Decimal("2"):
+            sl_price = HTF_low + (( HTF_high - HTF_low ) / Decimal("2"))
+        else:
+            sl_price = HTF_low
         sl_distance = current_close - sl_price
-        rr_target = current_close + (sl_distance * Decimal("1.5"))
+        rr_target = current_close + (sl_distance * ps.RR_ratio)
         target_price = (
             min(rr_target, recent_pivot_high)
             if recent_pivot_high is not None and recent_pivot_high > current_close
@@ -1541,9 +1544,12 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
         and current_close < HTF_low # LTF close is below HTF low
         #and HTF_open > HTF_close # the HTF candle is red
     ):
-        sl_price = HTF_high - (( HTF_high - HTF_low ) / Decimal("2"))
+        if ( HTF_high - HTF_low ) >= ATR * Decimal("2"):
+            sl_price = HTF_high - (( HTF_high - HTF_low ) / Decimal("2"))
+        else:
+            sl_price = HTF_high
         sl_distance = sl_price - current_close
-        rr_target = current_close - (sl_distance * Decimal("1.5"))
+        rr_target = current_close - (sl_distance * ps.RR_ratio)
         target_price = (
             max(rr_target, recent_pivot_low)
             if recent_pivot_low is not None and recent_pivot_low < current_close
