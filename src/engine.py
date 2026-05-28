@@ -89,8 +89,8 @@ def run_engine(candle_body: Dict[str, Any]):
     #=========================================================================================================================
 
     # Call engine modules to calculate engine parameters ====================================================================
-    sm.calculate_ATR(sm.timeframe)
     '''
+    sm.calculate_ATR(sm.timeframe)
     sm.calculate_MACD()
     sm.calculate_RSI()
     sm.calculate_EMA(speed="fast")

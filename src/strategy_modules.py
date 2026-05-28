@@ -2141,7 +2141,7 @@ def manage_HTF():
 
 
     #Calculate Indicators for HTF candle immediately after creation
-    #calculate_ATR(runtime["htf_tf"])
+    calculate_ATR(runtime["htf_tf"])
 
     update_pivot_buffer(runtime["htf_tf"])
     '''
