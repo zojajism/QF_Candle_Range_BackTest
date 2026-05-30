@@ -1466,77 +1466,150 @@ def is_valid_signal_detected_3LineStrike() -> tuple[bool, str, Decimal, Decimal]
 
     return False, None, None, None
 
+def is_candle_doji(candle, return_details: bool = False) -> bool | tuple[bool, str, str]:
+    """
+    Detect doji and optionally classify subtype/bias.
+
+    Returns:
+      - bool when return_details=False (default)
+      - (is_doji, pattern, bias) when return_details=True
+
+    pattern: doji | dragonfly_doji | gravestone_doji | none
+    bias: neutral | indecision | bullish_reversal | bearish_reversal
+    """
+
+    open_price = Decimal(str(candle["open"]))
+    close_price = Decimal(str(candle["close"]))
+    high_price = Decimal(str(candle["high"]))
+    low_price = Decimal(str(candle["low"]))
+
+    body_size = abs(close_price - open_price)
+    range_size = high_price - low_price
+    if range_size <= 0:
+        return (False, "none", "neutral") if return_details else False
+
+    upper_wick = high_price - max(open_price, close_price)
+    lower_wick = min(open_price, close_price) - low_price
+
+    # Common doji rule: real body <= 10% of candle range.
+    is_doji = (body_size / range_size) <= Decimal("0.10")
+    pattern = "none"
+    bias = "neutral"
+
+    if is_doji:
+        # For doji subtypes, use wick/body position on the total range.
+        small_top_wick = upper_wick <= (range_size * Decimal("0.15"))
+        small_bottom_wick = lower_wick <= (range_size * Decimal("0.15"))
+        long_lower_wick = lower_wick >= (range_size * Decimal("0.60"))
+        long_upper_wick = upper_wick >= (range_size * Decimal("0.60"))
+
+        if small_top_wick and long_lower_wick:
+            # Hammer-like doji: standard name is Dragonfly Doji.
+            pattern = "dragonfly_doji"
+            bias = "bullish_reversal"
+        elif small_bottom_wick and long_upper_wick:
+            # Shooting-star-like doji: standard name is Gravestone Doji.
+            pattern = "gravestone_doji"
+            bias = "bearish_reversal"
+        else:
+            pattern = "doji"
+            bias = "indecision"
+
+    return (is_doji, pattern, bias) if return_details else is_doji
+
 def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
-    key = Keys(exchange=exchange, symbol=symbol, timeframe=timeframe)
-    candle = buffer_initializer.CANDLE_BUFFER.last_n(key, 2)
+
+    signals = open_sig_registry._signals_by_symbol.get(symbol)
+    if signals:
+        return False, None, None, None
 
     runtime = _load_htf_runtime()
     if not runtime:
         return False, None, None, None
 
-    pivot_registry: PivotBufferRegistry = get_pivot_registry()
-    pb = pivot_registry.get(exchange, symbol, runtime["htf_tf"])
-    latest_peak = pb.latest_peak()
-    latest_low = pb.latest_low()
-    recent_pivot_high = Decimal(str(latest_peak.price)) if latest_peak and latest_peak.price is not None else None
-    recent_pivot_low = Decimal(str(latest_low.price)) if latest_low and latest_low.price is not None else None
+    htf_tf = runtime.get("htf_tf")
+    ltf_tf = runtime.get("ltf_tf") or timeframe
+    if not htf_tf:
+        return False, None, None, None
 
-    htf_key = Keys(exchange=exchange, symbol=symbol, timeframe=runtime["htf_tf"])
+    # Read the latest ATR values from indicator buffer for both timeframes.
+    ind_key_htf = IndicatorKey(symbol, htf_tf, "ATR")
+    ind_key_ltf = IndicatorKey(symbol, ltf_tf, "ATR")
+    htf_atr_rows = buffer_initializer.INDICATOR_BUFFER.last_n(ind_key_htf, 1)
+    ltf_atr_rows = buffer_initializer.INDICATOR_BUFFER.last_n(ind_key_ltf, 1)
+    if not htf_atr_rows or not ltf_atr_rows:
+        return False, None, None, None
+
+    ATR_HTF = Decimal(str(htf_atr_rows[-1]["value"]))
+    ATR_LTF = Decimal(str(ltf_atr_rows[-1]["value"]))
+    if ATR_HTF <= 0 or ATR_LTF <= 0:
+        return False, None, None, None
+    #---------------------------------------------------------------------
+
+    key = Keys(exchange=exchange, symbol=symbol, timeframe=timeframe)
+    candle = buffer_initializer.CANDLE_BUFFER.last_n(key, 1)
+    htf_key = Keys(exchange=exchange, symbol=symbol, timeframe=htf_tf)
     HTF_Candle = buffer_initializer.CANDLE_BUFFER.last_n(htf_key, 1)
 
-    HTF_ind_key = IndicatorKey(symbol, runtime["htf_tf"], "ATR")
-    HTF_ATR_values = buffer_initializer.INDICATOR_BUFFER.last_n(HTF_ind_key, 1)
-    HTF_ATR = Decimal(str(HTF_ATR_values[0]["value"])) if HTF_ATR_values else None
+
+    pivot_registry: PivotBufferRegistry = get_pivot_registry()
+    pb = pivot_registry.get(exchange, symbol, htf_tf)
+    latest_peak = pb.latest_peak()
+    latest_low = pb.latest_low()
+    recent_pivot_high = next((Decimal(str(p.price)) for p in pb.iter_peaks_newest_first() if p.price is not None and Decimal(str(candle[0]["close"])) < Decimal(str(p.price))), Decimal(str(latest_peak.price)) if latest_peak and latest_peak.price is not None else Decimal("Infinity"))
+    recent_pivot_low = next((Decimal(str(p.price)) for p in pb.iter_lows_newest_first() if p.price is not None and Decimal(str(candle[0]["close"])) > Decimal(str(p.price))), Decimal(str(latest_low.price)) if latest_low and latest_low.price is not None else Decimal("-Infinity"))
+
 
     if len(HTF_Candle) < 1:
         return False, None, None, None
+    if len(candle) < 1:
+        return False, None, None, None
+    
+    # Checking Doji fo HTF
+    is_doji, pattern, bias = is_candle_doji(HTF_Candle[0], return_details=True)
+    if is_doji and pattern == "doji" and bias == "indecision":
+        return False, None, None, None
+        
+    # Checking Doji fo LTF
+    is_doji, pattern, bias = is_candle_doji(candle[0], return_details=True)
+    if is_doji and pattern == "doji" and bias == "indecision":
+        return False, None, None, None
 
-    current_open = Decimal(str(candle[1]["open"]))
-    current_high = Decimal(str(candle[1]["high"]))
-    current_low = Decimal(str(candle[1]["low"]))
-    current_close = Decimal(str(candle[1]["close"]))
+    current_open = Decimal(str(candle[0]["open"]))
+    current_close = Decimal(str(candle[0]["close"]))
+    current_low = Decimal(str(candle[0]["low"]))
+    current_high = Decimal(str(candle[0]["high"]))
 
-    prev_open = Decimal(str(candle[0]["open"]))
-    prev_high = Decimal(str(candle[0]["high"]))
-    prev_low = Decimal(str(candle[0]["low"]))
-    prev_close = Decimal(str(candle[0]["close"]))
-
-    HTF_open = Decimal(str(HTF_Candle[0]["open"]))
     HTF_high = Decimal(str(HTF_Candle[0]["high"]))
     HTF_low = Decimal(str(HTF_Candle[0]["low"]))
+    HTF_open = Decimal(str(HTF_Candle[0]["open"]))
     HTF_close = Decimal(str(HTF_Candle[0]["close"]))
 
-    # Skip if last candle range is too large (>= 2 ATR)
-    # or if close is too close to open (potentially weak signal)
-    '''
-    if (HTF_high - HTF_low >= ATR * Decimal("2")
-        or abs(HTF_close - HTF_open) < ATR * Decimal("0.5")):
+    if HTF_high - HTF_low < ATR_HTF * Decimal("0.5"):
         return False, None, None, None
-    '''
-
-    #logger.info(f"HTF Range Check: HTF_open={HTF_open}, HTF_high={HTF_high}, HTF_low={HTF_low}, HTF_close={HTF_close}, current_open={current_open}, current_close={current_close}")
-    #logger.info(f"LTF Range Check: LTF_open={current_open}, LTF_high={current_high}, LTF_low={current_low}, LTF_close={current_close}, HTF_open={HTF_open}, HTF_high={HTF_high}, HTF_low={HTF_low}, HTF_close={HTF_close}")
+    
+    
     # --- Long setup ---
     if (
         current_open < current_close # the LTF candle is green
         and current_close > HTF_high # LTF close is above HTF high
         #and HTF_open < HTF_close # the HTF candle is green
     ):
-        if ( HTF_high - HTF_low ) >= ATR * Decimal("2"):
-            sl_price = HTF_low + (( HTF_high - HTF_low ) / Decimal("2"))
-        else:
-            sl_price = HTF_low
+        #if ( HTF_high - HTF_low ) >= ATR * Decimal("2"):
+            #sl_price = HTF_low + (( HTF_high - HTF_low ) / Decimal("2"))
+        #else:
+        sl_price = min(current_low - Decimal("0.0002"), current_close - ATR_LTF)
         sl_distance = current_close - sl_price
         rr_target = current_close + (sl_distance * ps.RR_ratio)
-        target_price = (
-            min(rr_target, recent_pivot_high)
-            if recent_pivot_high is not None and recent_pivot_high > current_close
-            else rr_target
-        )
-        if target_price > rr_target:
-            return False, None, None, None  # Skip if we had to reduce RR below 1.0 to fit pivot constraint
+
+        #if rr_target > recent_pivot_high:
+            #return False, None, None, None  # Skip if target is above recent pivot high, the pivot which in not yet hit. 
+                                            # It's possible that that pivot is not the exact recent, because this recent 5m candle close
+                                            # , has closed above couple of high pivots
+        #if recent_pivot_high < rr_target:
+            #return True, "BUY", recent_pivot_high, sl_price
         
-        return True, "BUY", target_price, sl_price
+        return True, "BUY", rr_target, sl_price
 
     # --- Short setup ---
     if (
@@ -1544,21 +1617,21 @@ def is_valid_signal_HTF_Range() -> tuple[bool, str, Decimal, Decimal]:
         and current_close < HTF_low # LTF close is below HTF low
         #and HTF_open > HTF_close # the HTF candle is red
     ):
-        if ( HTF_high - HTF_low ) >= ATR * Decimal("2"):
-            sl_price = HTF_high - (( HTF_high - HTF_low ) / Decimal("2"))
-        else:
-            sl_price = HTF_high
+        #if ( HTF_high - HTF_low ) >= ATR * Decimal("2"):
+            #sl_price = HTF_high - (( HTF_high - HTF_low ) / Decimal("2"))
+        #else:
+        sl_price = max(current_high + Decimal("0.0002"), current_close + ATR_LTF)
         sl_distance = sl_price - current_close
         rr_target = current_close - (sl_distance * ps.RR_ratio)
-        target_price = (
-            max(rr_target, recent_pivot_low)
-            if recent_pivot_low is not None and recent_pivot_low < current_close
-            else rr_target
-        )
-        if target_price < rr_target:
-            return False, None, None, None  # Skip if we had to reduce RR below 1.0 to fit pivot constraint
 
-        return True, "SELL", target_price, sl_price
+        #if rr_target < recent_pivot_low:
+            #return False, None, None, None # Skip if target is below recent pivot low, the pivot which in not yet hit. 
+                                            # It's possible that that pivot is not the exact recent, because this recent 5m candle close
+                                            # , has closed below couple of low pivots 
+        #if recent_pivot_low > rr_target:
+           #return True, "SELL", recent_pivot_low, sl_price
+        
+        return True, "SELL", rr_target, sl_price
 
 
     return False, None, None, None

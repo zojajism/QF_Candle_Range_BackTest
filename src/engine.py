@@ -89,8 +89,8 @@ def run_engine(candle_body: Dict[str, Any]):
     #=========================================================================================================================
 
     # Call engine modules to calculate engine parameters ====================================================================
-    '''
     sm.calculate_ATR(sm.timeframe)
+    '''
     sm.calculate_MACD()
     sm.calculate_RSI()
     sm.calculate_EMA(speed="fast")
@@ -118,7 +118,7 @@ def run_engine(candle_body: Dict[str, Any]):
     if pm.validate_trading_hours(sm.close_time) == False:
         order_is_allowed = False
 
-    if sm.Candle_Count_After_HTF_Reset != 1:
+    if sm.Candle_Count_After_HTF_Reset > 2:
         order_is_allowed = False
 
     # if all general conditions are met, then check strategy specific conditions and send order
